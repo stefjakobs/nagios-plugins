@@ -1,0 +1,114 @@
+#!/bin/sh
+
+# Description:
+# This Plugin determines whether the Sophos Anti Virus engine
+# is up to date. It will check the following:
+# * Is the file $SAV_TO_OLD greater than 0 Bytes and not older than
+#   $INTERVAL 
+# * Or does the file $LAST_UPDATE_FILE exist and is the containing
+#   timestamp not older than $INTERVAL
+# * Or does $LIBNAME not exist or is older than $MAXAGE
+#
+# This should plugin should work with version 4 and 9 of SAV.
+#
+# Output:
+# The script returns a CRIT when one of the above mentioned criteria
+# is matched
+#
+# Written by: Stefan Jakobs <projects AT localside.net>
+VERSION="20140624-1"
+
+# You may have to change this, depending on where you installed your
+# Nagios plugins
+PATH="/usr/bin:/usr/sbin:/bin:/sbin"
+LIBEXEC="/usr/lib/nagios/plugins"
+. $LIBEXEC/utils.sh
+
+print_usage() {
+   echo "Usage: $0"
+   echo "Usage: $0 --help"
+}
+
+print_help() {
+   echo ""
+   print_usage
+   echo ""
+   echo "Sophos AV Engine monitor plugin for Nagios"
+   echo ""
+   echo "This plugin is not developped by the Nagios Plugin group."
+   echo "Please do not e-mail them for support on this plugin, since"
+   echo "they won't know what you're talking about :P"
+   echo ""
+   echo "For contact info, read the plugin itself..."
+}
+
+if [ -n "$1" ]; then
+   case "$1" in
+      --help) print_help; exit $STATE_OK;;
+      -h) print_help; exit $STATE_OK;;
+      *) print_usage; exit $STATE_UNKNOWN;;
+   esac
+fi
+
+# Logfile where lines, like the following will be logged
+# amavis[6906]: (06906-07) (!)run_av (Sophie) FAILED - unexpected ,
+# output="-1:error: The main body of virus data is out of date. (0x0004021E)"
+SAV_TO_OLD=/srv/log/mail/mailrelay/sav_out_of_date
+
+INTERVAL="120"   # minutes
+MAXAGE="90"      # days
+LAST_UPDATE_FILE='/opt/sophos-av/etc/update.last_update'
+
+if [ "$(uname -i)" == "x86_64" ]; then
+   # path to libsavi.so
+   if [ -e /usr/lib64/libsavi.so ]; then
+      LIBSAVI="/usr/lib64/libsavi.so"
+   else
+      LIBSAVI="/opt/sophos-av/lib64/libsavi.so"
+   fi
+else
+   # path to libsavi.so
+   if [ -e /usr/lib/libsavi.so ]; then
+      LIBSAVI="/usr/lib/libsavi.so"
+   else
+      LIBSAVI="/opt/sophos-av/lib64/libsavi.so"
+   fi
+fi
+
+if test -s $SAV_TO_OLD; then
+   LIST=$(find "$(dirname $SAV_TO_OLD)" -mmin -$INTERVAL -name "$(basename $SAV_TO_OLD)");
+   if [ -z "$LIST" ]; then
+      echo "OK - Sophos AV engine is up to date";
+      exit $STATE_OK
+   else
+      echo "CRITICAL - Sophos AV engine is too old";
+      exit $STATE_CRITICAL
+   fi
+elif [ -r "$LAST_UPDATE_FILE" ]; then
+   LAST_UPDATE=$(cat $LAST_UPDATE_FILE)
+   NOW="$(date +%s)"
+   DIFF="$(echo "${INTERVAL}*60" | bc)"
+
+   if [[ "$(( $NOW - $LAST_UPDATE ))" -le "$DIFF" ]]; then
+      echo "OK - Sophos AV engine is up to date";
+      exit $STATE_OK
+   else
+      echo "CRITICAL - Sophos AV engine is too old";
+      exit $STATE_CRITICAL
+   fi
+else
+   if [ -e $LIBSAVI ]; then
+      LIST=$(find "$(dirname $LIBSAVI)" -mtime +$MAXAGE -name "$(basename $LIBSAVI)")
+      if [ -z "$LIST" ]; then
+         echo "OK - Sophos AV engine is up to date";
+         exit $STATE_OK
+      else
+         echo "WARNING - Sophos AV library ($LIBSAVI) is older than $MAXAGE days";
+         exit $STATE_WARNING
+      fi
+   else
+      echo "CRITICAL - Sophos AV library does not exist"
+      exit $STATE_CRITICAL
+   fi
+fi
+
